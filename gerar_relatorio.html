@@ -53,7 +53,7 @@
             width: 100%;
             transition: border-color 0.2s ease, box-shadow 0.2s ease;
         }
-         .control-panel input:focus {
+        .control-panel input:focus {
             border-color: #58508d;
             box-shadow: 0 0 0 3px rgba(88, 80, 141, 0.2);
             outline: none;
@@ -66,9 +66,25 @@
             50% { background-color: #7a70a9; }
             100% { background-color: #58508d; }
         }
+        #pdf-loader {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 9999;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body class="bg-slate-50 text-gray-800">
+    <div id="pdf-loader" style="display: none;">Gerando PDF, por favor aguarde...</div>
 
     <div id="infographic-content" class="container mx-auto p-4 md:p-8">
 
@@ -224,101 +240,148 @@
             document.getElementById('total-risco').innerText = totalRisco.toLocaleString('pt-BR');
             document.getElementById('total-ok').innerText = totalOk.toLocaleString('pt-BR');
 
-            overviewChart.data.datasets[0].data = [totalOk, totalRisco];
-            overviewChart.update();
+            if(overviewChart) {
+                overviewChart.data.datasets[0].data = [totalOk, totalRisco];
+                overviewChart.update('none'); 
+            }
 
-            riskChart.data.datasets[0].data = [valBloqueio, valOrfa, valMultiplas, valRecontratacao];
-            riskChart.update();
+            if(riskChart) {
+                riskChart.data.datasets[0].data = [valBloqueio, valOrfa, valMultiplas, valRecontratacao];
+                riskChart.update('none'); 
+            }
             
             document.getElementById('update-button').classList.remove('needs-update');
         }
 
-        function downloadPDF() {
+        async function downloadPDF() {
+            const loader = document.getElementById('pdf-loader');
             const reportContent = document.getElementById('infographic-content');
             const controlPanel = document.getElementById('controls');
             const downloadBtn = document.getElementById('download-button');
             
+            loader.style.display = 'flex';
             controlPanel.style.visibility = 'hidden';
-            downloadBtn.innerText = 'Gerando PDF...';
             downloadBtn.disabled = true;
 
-            html2canvas(reportContent, { scale: 2, useCORS: true }).then(canvas => {
-                const imgData = canvas.toDataURL('image/png');
+            await document.fonts.ready;
+            // A small delay to ensure rendering is complete after fonts are ready
+            await new Promise(resolve => setTimeout(resolve, 500)); 
+
+            html2canvas(reportContent, {
+                scale: 2,
+                useCORS: true,
+                logging: false,
+                width: reportContent.scrollWidth,
+                height: reportContent.scrollHeight
+            }).then(canvas => {
+                const imgData = canvas.toDataURL('image/png', 1.0);
                 const pdf = new jsPDF({
                     orientation: 'portrait',
                     unit: 'px',
                     format: 'a4'
                 });
-                
+
                 const imgProps = pdf.getImageProperties(imgData);
                 const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+                const pdfHeight = pdf.internal.pageSize.getHeight();
                 
-                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+                const ratio = pdfWidth / imgProps.width;
+                const finalImgHeight = imgProps.height * ratio;
+
+                let heightLeft = finalImgHeight;
+                let position = 0;
+
+                pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, finalImgHeight);
+                heightLeft -= pdfHeight;
+
+                while (heightLeft > 0) {
+                    position -= pdfHeight;
+                    pdf.addPage();
+                    pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, finalImgHeight);
+                    heightLeft -= pdfHeight;
+                }
+                
                 pdf.save('Relatorio_Revisao_Acessos_PDV_Linx.pdf');
                 
+                loader.style.display = 'none';
                 controlPanel.style.visibility = 'visible';
-                downloadBtn.innerText = 'Baixar como PDF';
                 downloadBtn.disabled = false;
             }).catch(err => {
                 console.error("Erro ao gerar PDF:", err);
+                loader.style.display = 'none';
                 controlPanel.style.visibility = 'visible';
-                downloadBtn.innerText = 'Baixar como PDF';
                 downloadBtn.disabled = false;
             });
         }
 
         function initializeApp() {
             const riskChartCtx = document.getElementById('riskChart');
-            riskChart = new Chart(riskChartCtx, {
-                type: 'bar',
-                data: {
-                    labels: [
-                        wrapLabels('Bloqueio (Demitido) �', 20),
-                        wrapLabels('Investigar (Conta Órfã) 🔥', 20),
-                        wrapLabels('Investigar (Múltiplas Matrículas) ⚠️', 20),
-                        wrapLabels('Corrigir (Recontratação) ⚠️', 20),
-                    ],
-                    datasets: [{
-                        label: 'Quantidade de Contas',
-                        data: [],
-                        backgroundColor: ['#ff6361', '#ef4444', '#ffa600', '#f59e0b'],
-                    }]
-                },
-                options: {
-                    indexAxis: 'y',
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    scales: { y: { ticks: { font: { size: 12, weight: '500' } } } },
-                    plugins: { ...commonTooltipConfig.plugins, legend: { display: false } }
-                }
-            });
+            if (riskChartCtx) {
+                riskChart = new Chart(riskChartCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: [
+                            wrapLabels('Bloqueio (Demitido) 🔥', 20),
+                            wrapLabels('Investigar (Conta Órfã) 🔥', 20),
+                            wrapLabels('Investigar (Múltiplas Matrículas) ⚠️', 20),
+                            wrapLabels('Corrigir (Recontratação) ⚠️', 20),
+                        ],
+                        datasets: [{
+                            label: 'Quantidade de Contas',
+                            data: [],
+                            backgroundColor: ['#ff6361', '#ef4444', '#ffa600', '#f59e0b'],
+                        }]
+                    },
+                    options: {
+                        animation: false,
+                        indexAxis: 'y',
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: { y: { ticks: { font: { size: 12, weight: '500' } } } },
+                        plugins: { ...commonTooltipConfig.plugins, legend: { display: false } }
+                    }
+                });
+            }
 
             const overviewChartCtx = document.getElementById('overviewChart');
-            overviewChart = new Chart(overviewChartCtx, {
-                type: 'doughnut',
-                data: {
-                    labels: ['Contas OK', 'Contas com Ação Necessária'],
-                    datasets: [{
-                        data: [],
-                        backgroundColor: ['#4ade80', '#ff6361'],
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { ...commonTooltipConfig.plugins, legend: { position: 'bottom', labels: { font: { size: 14 } } } }
-                }
-            });
+            if (overviewChartCtx) {
+                overviewChart = new Chart(overviewChartCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Contas OK', 'Contas com Ação Necessária'],
+                        datasets: [{
+                            data: [],
+                            backgroundColor: ['#4ade80', '#ff6361'],
+                        }]
+                    },
+                    options: {
+                        animation: false,
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { ...commonTooltipConfig.plugins, legend: { position: 'bottom', labels: { font: { size: 14 } } } }
+                    }
+                });
+            }
 
             loadData();
             updateReport();
             
             inputIds.forEach(id => {
-                document.getElementById(id).addEventListener('input', saveData);
+                const element = document.getElementById(id);
+                if (element) {
+                   element.addEventListener('input', saveData);
+                }
             });
-            document.getElementById('update-button').addEventListener('click', updateReport);
-            document.getElementById('download-button').addEventListener('click', downloadPDF);
+
+            const updateButton = document.getElementById('update-button');
+            if (updateButton) {
+                updateButton.addEventListener('click', updateReport);
+            }
+
+            const downloadButton = document.getElementById('download-button');
+            if(downloadButton) {
+                downloadButton.addEventListener('click', downloadPDF);
+            }
         }
 
         window.addEventListener('load', initializeApp);
